@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Saturation Rate Calculator</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Lato:wght@400;700;900&display=swap" rel="stylesheet"/>
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      document.body.innerHTML = '<div style="font-family:monospace;padding:24px;color:#c00;background:#fff">'
+        + '<b>Error:</b> ' + msg + '<br><br>'
+        + '<b>Source:</b> ' + (src||'(inline)') + ':' + line + ':' + col + '<br><br>'
+        + (err && err.stack ? '<pre>' + err.stack + '</pre>' : '(no stack:open browser DevTools for details)')
+        + '</div>';
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      document.body.innerHTML = '<div style="font-family:monospace;padding:24px;color:#c00;background:#fff">'
+        + '<b>Unhandled rejection:</b> ' + (e.reason && e.reason.message || e.reason) + '<br><br>'
+        + (e.reason && e.reason.stack ? '<pre>' + e.reason.stack + '</pre>' : '')
+        + '</div>';
+    });
+  </script>
+  <style>
+    body { font-family: 'Lato', sans-serif; background: #FBF9F7; color: #232A33; }
+    .serif { font-family: 'DM Serif Display', serif; }
+.calc-cell { background: #f9fafb; }
+    .diff-pos { color: #16a34a; font-weight: 600; }
+    .diff-neg { color: #F4675E; font-weight: 600; }
+    .ee-red         { color: #F4675E; }
+    .ee-red-bg      { background-color: #FDE1DF; }
+    .ee-red-solid   { background-color: #F4675E; }
+    .ee-red-bar     { background-color: #FDE1DF; }
+    .ee-red-faint   { background-color: #FDE1DF; }
+    .ee-red-border  { border-color: rgba(244,103,94,0.35); }
+    .ee-amber-text  { color: #595959; }
+    .text-gray-900  { color: #232A33 !important; }
+    .text-gray-800  { color: #232A33 !important; }
+    @media print {
+      .no-print { display: none !important; }
+      @page { size: A4 portrait; margin: 1cm; }
+      body { zoom: 65%; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { background: white !important; }
+      .print-section { break-before: page; page-break-before: always; }
+      .print-section:first-of-type { break-before: auto; page-break-before: auto; }
+      .print-section-label { font-size: 11px; font-weight: 800; color: #6b7280; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+    const parseNum = (s) => {
+      const str = String(s).replace(/,/g, '').replace(/\$/g, '').trim();
+      const m = str.match(/^([\d.]+)\s*([km]?)$/i);
+      if (!m) return 0;
+      const base = parseFloat(m[1]);
+      if (isNaN(base)) return 0;
+      const suffix = m[2].toLowerCase();
+      return suffix === 'k' ? base * 1000 : suffix === 'm' ? base * 1000000 : base;
+    };
+    const safe = (n) => (isFinite(n) && !isNaN(n)) ? n : null;
+    const fmtInt  = (n) => Math.round(n).toLocaleString('en-AU');
+    const fmtDec  = (n, d = 2) => n.toLocaleString('en-AU', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const fmtDollar = (n) => '$' + fmtDec(Math.abs(n)) ;
+    const fmtDollarSigned = (n) => (n < 0 ? '-$' : '$') + fmtDec(Math.abs(n));
+    const fmtPct  = (n) => (n * 100).toFixed(1) + '%';
+    const show    = (n, fmt) => (n === null || n === undefined) ? '' : fmt(n);
+
+    // ── constants ─────────────────────────────────────────────────────────────
+    const ROWS = [
+      { key: 'mofbofCombined', label: 'MOF/BOF Combined',          audienceKey: 'mofbofCombined' },
+      { key: 'mofbofExcl',     label: 'MOF/BOF Excl. Video Views', audienceKey: 'mofbofExcl' },
+      { key: 'new',            label: 'New',                        audienceKey: null },
+      { key: 'engaged',        label: 'Engaged',                    audienceKey: 'engaged' },
+      { key: 'existing',       label: 'Existing',                   audienceKey: 'existing' },
+    ];
+
+    const AUDIENCES = [
+      {
+        key: 'mofbofCombined',
+        label: 'MOF/BOF Combined',
+        definition: [
+          'Facebook Engagement – All – 365 Days',
+          'Instagram Engagement – All – 365 Days',
+          'Website – All Website Visits – 180 Days',
+          'Email List – Klaviyo – All Time',
+          'Website – Purchase – 180 Days',
+          'Email List – Klaviyo – All Purchasers',
+          'Video – 95% Views – 365 Days',
+        ],
+      },
+      {
+        key: 'mofbofExcl',
+        label: 'MOF/BOF Excl. Video Views',
+        definition: [
+          'Facebook Engagement – All – 365 Days',
+          'Instagram Engagement – All – 365 Days',
+          'Website – All Website Visits – 180 Days',
+          'Email List – Klaviyo – All Time',
+          'Website – Purchase – 180 Days',
+          'Email List – Klaviyo – All Purchasers',
+        ],
+      },
+      {
+        key: 'engaged',
+        label: 'Engaged',
+        definition: [
+          'Email List – Klaviyo – All Time',
+          'Website – All Website Visits – 180 Days',
+        ],
+      },
+      {
+        key: 'existing',
+        label: 'Existing Customers',
+        definition: [
+          'Website – Purchase – 180 Days',
+          'Email List – Klaviyo – All Purchasers',
+        ],
+      },
+    ];
+
+    const SALE_TYPES = [
+      { value: 'highRepeat', label: 'High Repeat', pct: 0.65 },
+      { value: 'hybrid',     label: 'Hybrid',      pct: 0.50 },
+      { value: 'lowRepeat',  label: 'Low Repeat',  pct: 0.15 },
+    ];
+
+    // ── sample data (from Excel) ──────────────────────────────────────────────
+    const SAMPLES = [
+      {
+        label: 'Sample',
+        session: { brand: 'Example Sale', saleDate: 'Aug 2025' },
+        audiences: {
+          mofbofCombined: { low: '637,000', high: '749,500' },
+          mofbofExcl:     { low: '267,400', high: '314,600' },
+          engaged:        { low: '155,600', high: '183,100' },
+          existing:       { low: '71,300',  high: '83,900'  },
+        },
+        days: [
+          {
+            purchase: {
+              mofbofCombined: { reach: '108,674', spend: '9,637',  impressions: '262,695' },
+              mofbofExcl:     { reach: '108,674', spend: '9,637',  impressions: '262,695' },
+              new:            { reach: '70,413',  spend: '2,779',  impressions: '125,893' },
+              engaged:        { reach: '18,787',  spend: '3,191',  impressions: '67,410'  },
+              existing:       { reach: '15,804',  spend: '3,666',  impressions: '69,389'  },
+              revenue: '175,565',
+            },
+            allObj: {
+              mofbofCombined: { reach: '271,394', spend: '21,734', impressions: '770,253' },
+              mofbofExcl:     { reach: '271,394', spend: '21,734', impressions: '770,253' },
+              new:            { reach: '189,151', spend: '6,519',  impressions: '346,810' },
+              engaged:        { reach: '43,188',  spend: '4,803',  impressions: '134,809' },
+              existing:       { reach: '25,515',  spend: '4,597',  impressions: '101,245' },
+              revenue: '238,285',
+            },
+          },
+          {
+            purchase: {
+              mofbofCombined: { reach: '94,850',  spend: '9,980',  impressions: '289,410' },
+              mofbofExcl:     { reach: '94,850',  spend: '9,980',  impressions: '289,410' },
+              new:            { reach: '59,200',  spend: '2,640',  impressions: '118,750' },
+              engaged:        { reach: '22,340',  spend: '3,480',  impressions: '79,620'  },
+              existing:       { reach: '18,110',  spend: '3,860',  impressions: '81,200'  },
+              revenue: '161,840',
+            },
+            allObj: {
+              mofbofCombined: { reach: '247,820', spend: '22,390', impressions: '824,170' },
+              mofbofExcl:     { reach: '247,820', spend: '22,390', impressions: '824,170' },
+              new:            { reach: '171,600', spend: '6,840',  impressions: '371,290' },
+              engaged:        { reach: '49,730',  spend: '5,120',  impressions: '153,640' },
+              existing:       { reach: '28,760',  spend: '4,880',  impressions: '115,380' },
+              revenue: '219,440',
+            },
+          },
+          {
+            purchase: {
+              mofbofCombined: { reach: '79,340',  spend: '10,210', impressions: '312,580' },
+              mofbofExcl:     { reach: '79,340',  spend: '10,210', impressions: '312,580' },
+              new:            { reach: '46,880',  spend: '2,510',  impressions: '111,400' },
+              engaged:        { reach: '25,610',  spend: '3,720',  impressions: '91,340'  },
+              existing:       { reach: '20,490',  spend: '3,980',  impressions: '92,860'  },
+              revenue: '144,270',
+            },
+            allObj: {
+              mofbofCombined: { reach: '221,450', spend: '23,140', impressions: '876,320' },
+              mofbofExcl:     { reach: '221,450', spend: '23,140', impressions: '876,320' },
+              new:            { reach: '149,830', spend: '7,060',  impressions: '393,410' },
+              engaged:        { reach: '55,280',  spend: '5,390',  impressions: '171,820' },
+              existing:       { reach: '31,940',  spend: '5,110',  impressions: '128,670' },
+              revenue: '196,580',
+            },
+          },
+        ],
+      },
+      {
+        label: 'Fashion A: EOSS',
+        session: { brand: 'Fashion A: EOSS Sale', saleDate: 'Mar 2026' },
+        audiences: {
+          mofbofCombined: { low: '452,500', high: '532,400' },
+          mofbofExcl:     { low: '433,200', high: '509,600' },
+          engaged:        { low: '216,000', high: '254,100' },
+          existing:       { low: '23,000',  high: '27,100'  },
+        },
+        purchase: {
+          mofbofCombined: { reach: '53,250',  spend: '3,769', impressions: '197,494' },
+          mofbofExcl:     { reach: '53,250',  spend: '3,769', impressions: '197,494' },
+          new:            { reach: '21,340',  spend: '511',   impressions: '43,428'  },
+          engaged:        { reach: '150,009', spend: '147',   impressions: '8,452'   },
+          existing:       { reach: '20,000',  spend: '3,111', impressions: '145,614' },
+          revenue: '82,369',
+        },
+        allObj: {
+          mofbofCombined: { reach: '140,135', spend: '6,296', impressions: '382,687' },
+          mofbofExcl:     { reach: '140,135', spend: '6,296', impressions: '382,687' },
+          new:            { reach: '21,428',  spend: '511',   impressions: '43,428'  },
+          engaged:        { reach: '3,630',   spend: '147',   impressions: '8,452'   },
+          existing:       { reach: '28,225',  spend: '3,111', impressions: '145,616' },
+          revenue: '95,801',
+        },
+      },
+      {
+        label: 'Fashion B: EOFY',
+        session: { brand: 'Fashion B: EOFY', saleDate: 'Aug 2025' },
+        audiences: {
+          mofbofCombined: { low: '582,600', high: '685,400' },
+          mofbofExcl:     { low: '582,100', high: '684,900' },
+          engaged:        { low: '517,400', high: '608,800' },
+          existing:       { low: '154,900', high: '182,200' },
+        },
+        purchase: {
+          mofbofCombined: { reach: '62,414', spend: '4,602', impressions: '187,828' },
+          mofbofExcl:     { reach: '62,414', spend: '4,602', impressions: '187,828' },
+          new:            { reach: '17,247', spend: '648',   impressions: '38,509'  },
+          engaged:        { reach: '15,648', spend: '1,049', impressions: '44,487'  },
+          existing:       { reach: '29,380', spend: '2,905', impressions: '104,832' },
+          revenue: '48,735',
+        },
+        allObj: {
+          mofbofCombined: { reach: '137,247', spend: '5,159', impressions: '291,369' },
+          mofbofExcl:     { reach: '137,247', spend: '5,159', impressions: '291,369' },
+          new:            { reach: '18,072',  spend: '698',   impressions: '40,356'  },
+          engaged:        { reach: '16,263',  spend: '1,098', impressions: '46,109'  },
+          existing:       { reach: '30,866',  spend: '3,096', impressions: '110,786' },
+          revenue: '49,080',
+        },
+      },
+      {
+        label: 'Bedding: Mid Year',
+        session: { brand: 'Bedding: Mid Year Sale', saleDate: 'Oct 2025' },
+        audiences: {
+          mofbofCombined: { low: '202,300', high: '238,000' },
+          mofbofExcl:     { low: '135,000', high: '158,800' },
+          engaged:        { low: '71,700',  high: '84,400'  },
+          existing:       { low: '15,500',  high: '18,100'  },
+        },
+        purchase: {
+          mofbofCombined: { reach: '37,952', spend: '3,567', impressions: '107,518' },
+          mofbofExcl:     { reach: '33,683', spend: '3,016', impressions: '87,543'  },
+          new:            { reach: '25,615', spend: '1,320', impressions: '54,119'  },
+          engaged:        { reach: '7,735',  spend: '999',   impressions: '25,951'  },
+          existing:       { reach: '4,981',  spend: '1,246', impressions: '27,448'  },
+          revenue: '44,422',
+        },
+        allObj: {
+          mofbofCombined: { reach: '57,285', spend: '4,584', impressions: '215,369' },
+          mofbofExcl:     { reach: '53,375', spend: '4,033', impressions: '195,394' },
+          new:            { reach: '37,107', spend: '1,860', impressions: '115,415' },
+          engaged:        { reach: '10,239', spend: '1,201', impressions: '44,983'  },
+          existing:       { reach: '10,355', spend: '1,523', impressions: '54,971'  },
+          revenue: '47,640',
+        },
+      },
+      {
+        label: 'Baby A: Flash Sale',
+        session: { brand: 'Baby A: 4hr Flash Sale', saleDate: 'Sep 2025' },
+        audiences: {
+          mofbofCombined: { low: '457,000', high: '538,000' },
+          mofbofExcl:     { low: '389,200', high: '457,900' },
+          engaged:        { low: '188,200', high: '221,400' },
+          existing:       { low: '7,100',   high: '8,400'   },
+        },
+        purchase: {
+          mofbofCombined: { reach: '239,403', spend: '26,971', impressions: '1,164,816' },
+          mofbofExcl:     { reach: '239,403', spend: '26,971', impressions: '1,164,816' },
+          new:            { reach: '154,826', spend: '10,295', impressions: '570,455'   },
+          engaged:        { reach: '78,931',  spend: '13,477', impressions: '513,527'   },
+          existing:       { reach: '7,233',   spend: '3,198',  impressions: '80,834'    },
+          revenue: '471,057',
+        },
+        allObj: {
+          mofbofCombined: { reach: '312,470', spend: '32,536', impressions: '1,566,970' },
+          mofbofExcl:     { reach: '312,470', spend: '32,526', impressions: '1,566,970' },
+          new:            { reach: '205,924', spend: '12,576', impressions: '774,632'   },
+          engaged:        { reach: '100,615', spend: '16,427', impressions: '697,915'   },
+          existing:       { reach: '7,377',   spend: '3,553',  impressions: '94,423'    },
+          revenue: '563,260',
+        },
+      },
+    ];
+
+    // ── reusable numeric input ────────────────────────────────────────────────
+    function NumInput({ value, onChange, placeholder, prefix, dollarFormat, className = '' }) {
+      const handleBlur = () => {
+        const n = parseNum(value);
+        if (n !== 0) onChange(dollarFormat ? '$' + fmtInt(n) : fmtInt(n));
+      };
+      if (prefix) {
+        return (
+          <div className="relative">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs select-none pointer-events-none">{prefix}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={value}
+              placeholder="0"
+              onChange={e => onChange(e.target.value)}
+              onBlur={handleBlur}
+              className={`w-full pl-4 pr-1 py-1 border border-gray-300 rounded text-right text-xs focus:outline-none focus:border-gray-500 bg-white ${className}`}
+            />
+          </div>
+        );
+      }
+      return (
+        <input
+          type="text"
+          inputMode="numeric"
+          value={value}
+          placeholder={dollarFormat ? '$0' : (placeholder || '0')}
+          onChange={e => onChange(e.target.value)}
+          onBlur={handleBlur}
+          className={`w-full px-2 py-1 border border-gray-300 rounded text-right text-xs focus:outline-none focus:border-gray-500 bg-white placeholder-gray-300 ${className}`}
+        />
+      );
+    }
+
+    // ── tooltip ───────────────────────────────────────────────────────────────
+    function Tip({ text }) {
+      const [pos, setPos] = React.useState(null);
+      const btnRef = React.useRef(null);
+
+      const show = () => {
+        if (btnRef.current) {
+          const r = btnRef.current.getBoundingClientRect();
+          const rawLeft = r.left + r.width / 2;
+          const tipW = 288;
+          const margin = 10;
+          const clampedLeft = Math.max(tipW / 2 + margin, Math.min(rawLeft, window.innerWidth - tipW / 2 - margin));
+          setPos({ top: r.top + window.scrollY, left: clampedLeft, arrowOffset: rawLeft - clampedLeft });
+        }
+      };
+
+      return (
+        <span className="inline-flex items-center ml-1" style={{verticalAlign:'middle', lineHeight:1}}>
+          <button
+            ref={btnRef}
+            onMouseEnter={show}
+            onMouseLeave={() => setPos(null)}
+            onFocus={show}
+            onBlur={() => setPos(null)}
+            className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 leading-none inline-flex items-center justify-center hover:bg-gray-400 hover:text-white transition-colors"
+            style={{fontSize:'9px'}}
+          >?</button>
+          {pos && ReactDOM.createPortal(
+            <div
+              style={{
+                position: 'absolute',
+                top: pos.top - 8,
+                left: pos.left,
+                transform: 'translate(-50%, -100%)',
+                zIndex: 9999,
+                width: '288px',
+                background: '#232A33',
+                color: '#fff',
+                fontSize: '12px',
+                lineHeight: '1.5',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                pointerEvents: 'none',
+              }}
+            >
+              {text}
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: '50%',
+                transform: `translateX(calc(-50% + ${pos.arrowOffset}px))`,
+                borderWidth: '5px',
+                borderStyle: 'solid',
+                borderColor: '#232A33 transparent transparent transparent',
+              }} />
+            </div>,
+            document.body
+          )}
+        </span>
+      );
+    }
+
+    // ── Hype Spend Calculator ─────────────────────────────────────────────────
+    function HypeSpendCalc() {
+      const [day1Rev,  setDay1Rev]  = useState('');
+      const [saleMer,  setSaleMer]  = useState('');
+      const [saleType, setSaleType] = useState('highRepeat');
+
+      const rev      = parseNum(day1Rev);
+      const merPct   = parseNum(saleMer) / 100;
+      const typeOpt  = SALE_TYPES.find(o => o.value === saleType);
+
+      const totalBudget = rev > 0 && merPct > 0 ? safe(rev * merPct) : null;
+      const recSpend    = totalBudget !== null ? safe(totalBudget * typeOpt.pct) : null;
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-5 py-4 flex flex-wrap items-end gap-4">
+          {/* Day 1 Revenue */}
+          <div className="w-40">
+            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wide">Day 1 Revenue Target</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={day1Rev}
+              placeholder="$200,000"
+              onChange={e => setDay1Rev(e.target.value)}
+              onBlur={() => { let n = parseNum(day1Rev); if (n > 0 && n < 1000) n *= 1000; if (n) setDay1Rev('$' + fmtInt(n)); }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right focus:outline-none focus:border-gray-500 placeholder-gray-300"
+            />
+          </div>
+
+          {/* Sale MER */}
+          <div className="w-28">
+            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wide">Sale MER <Tip text="The MER (Marketing Efficiency Ratio) you are targeting for the sale overall. This determines your total hype budget: Day 1 Revenue × Sale MER = Total Hype Budget." /></label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={saleMer}
+              placeholder="20%"
+              onChange={e => setSaleMer(e.target.value)}
+              onBlur={() => { const n = parseNum(saleMer); if (n) setSaleMer(n % 1 === 0 ? n + '%' : n.toFixed(1) + '%'); }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-right focus:outline-none focus:border-gray-500 placeholder-gray-300"
+            />
+          </div>
+
+          {/* spacer */}
+          <div className="w-8" />
+
+          {/* Style of Sale */}
+          <div className="flex-1 min-w-48">
+            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wide">Style of Sale <Tip text="High Repeat: customers buy again every sale:spend 65% of budget. Hybrid: mix of repeat and new buyers:spend 50%. Low Repeat: mostly new buyers each sale:spend 15%. Your sale type determines how aggressively to hype your existing audience." /></label>
+            <div className="flex gap-1.5">
+              {SALE_TYPES.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setSaleType(opt.value)}
+                  className={`flex-1 py-2 px-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                    saleType === opt.value
+                      ? 'bg-gray-900 text-white border-gray-900'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <div>{opt.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* spacer */}
+          <div className="w-8" />
+
+          {/* divider */}
+          <div className="hidden md:block w-px self-stretch bg-gray-200 mx-1" />
+
+          {/* Total Budget */}
+          <div className="w-36">
+            <div className="text-xs font-bold text-gray-500 mb-1">Total Hype Budget</div>
+            <div className="text-lg font-bold text-gray-900">{show(totalBudget, fmtDollar)}</div>
+          </div>
+
+          {/* Recommended Spend */}
+          <div className="flex-1 min-w-40">
+            <div className="text-xs font-bold text-gray-500 mb-1">Recommended Spend <span className="font-normal">({typeOpt.label} · {Math.round(typeOpt.pct * 100)}%)</span></div>
+            <div className="text-2xl font-bold text-gray-900">{show(recSpend, fmtDollar)}</div>
+          </div>
+
+        </div>
+      );
+    }
+
+    // ── audience helpers ──────────────────────────────────────────────────────
+    const audienceAvg = (aud) => {
+      const lo = parseNum(aud.low);
+      const hi = parseNum(aud.high);
+      return (lo + hi) / 2;
+    };
+
+    // ── Audience Size section ─────────────────────────────────────────────────
+    function AudienceSection({ audiences, onChange }) {
+      const [showDefs,    setShowDefs]    = useState(false);
+      const [collapsed,   setCollapsed]   = useState(false);
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5 flex items-center justify-between" style={{backgroundColor:'#0E318E'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">1. Audience Size</h3>
+            <button
+              onClick={() => setCollapsed(c => !c)}
+              className="text-white/70 hover:text-white text-xs font-semibold transition-colors"
+            >
+              {collapsed ? '▼ Show' : '▲ Hide'}
+            </button>
+          </div>
+          {!collapsed && <><div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{minWidth:'1120px'}}>
+              <colgroup>
+                <col style={{width:'190px'}} />
+                <col style={{width:'112px'}} />
+                <col style={{width:'112px'}} />
+                <col style={{width:'112px'}} />
+                <col style={{width:'96px'}} />
+                <col style={{width:'80px'}} />
+                <col style={{width:'96px'}} />
+                <col style={{width:'96px'}} />
+                <col style={{width:'112px'}} />
+                <col style={{width:'112px'}} />
+                <col style={{width:'112px'}} />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide" style={{width:'190px'}}>Audience</th>
+                  <th className="text-right px-2 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide w-28">Low</th>
+                  <th className="text-right px-2 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide w-28">High</th>
+                  <th colSpan={2} className="text-right px-2 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide">
+                    Est. Total Audience
+                    <Tip text="Create a Meta campaign with each audience group as targeting. Use the estimated audience size button:this accounts for overlap between audiences (e.g. someone in your email list who also visits your website). The old method of adding audiences manually overestimates by up to 40%. Measure fresh before each sale as the size changes." />
+                  </th>
+                  <th className="w-20 bg-gray-100" />
+                  <th className="w-24 bg-gray-100" />
+                  <th className="w-24 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                </tr>
+              </thead>
+              <tbody>
+                {AUDIENCES.map((aud, i) => {
+                  const avg = audienceAvg(audiences[aud.key]);
+                  const lo  = parseNum(audiences[aud.key].low);
+                  const hi  = parseNum(audiences[aud.key].high);
+                  return (
+                    <tr key={aud.key} className={`border-b border-gray-100 ${i % 2 === 1 ? 'bg-gray-50' : ''}`}>
+                      <td className="px-3 py-2 text-gray-800 font-medium">
+                        {aud.label}
+                        {aud.key === 'mofbofExcl' && <Tip text="This is the primary metric for your benchmark. Video views (especially 3-second) include people who were just scrolling past:not true mid-funnel. Excluding them gives a more accurate picture of your reachable engaged audience." />}
+                        {aud.key === 'engaged' && <Tip text="Your warm audience: people on your email list, recent website visitors, add-to-cart and initiated checkout. These are the people most ready to buy." />}
+                        {aud.key === 'existing' && <Tip text="Past purchasers: website purchases in the last 180 days and all Klaviyo purchasers. High-value audience:they've bought before and are most likely to buy again." />}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <NumInput value={audiences[aud.key].low}  onChange={v => onChange(aud.key, 'low',  v)} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <NumInput value={audiences[aud.key].high} onChange={v => onChange(aud.key, 'high', v)} />
+                      </td>
+                      <td colSpan={2} className="px-2 py-2 text-right font-bold text-gray-900 calc-cell">
+                        {lo === 0 && hi === 0 ? '' : fmtInt(avg)}
+                      </td>
+                      <td className="bg-gray-100" />
+                      <td className="bg-gray-100" />
+                      <td className="bg-gray-100" />
+                      <td className="bg-gray-100" />
+                      <td className="bg-gray-100" />
+                      <td className="bg-gray-100" />
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="border-t border-gray-100">
+            <button
+              onClick={() => setShowDefs(d => !d)}
+              className="w-full text-left px-5 py-2 text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1.5"
+            >
+              <span>{showDefs ? '▲' : '▼'}</span>
+              Audience Definition & Campaign Structure
+            </button>
+            {showDefs && (
+              <div className="px-5 pb-5 flex gap-8">
+                {/* Audience definitions — cols 1 & 2 */}
+                <div className="grid grid-cols-2 gap-5 flex-1">
+                  {AUDIENCES.map(aud => (
+                    <div key={aud.key}>
+                      <div className="text-xs font-bold text-gray-700 mb-1.5">{aud.label}</div>
+                      <ul className="space-y-0.5">
+                        {aud.definition.map(d => (
+                          <li key={d} className="text-xs text-gray-500 flex items-start gap-1.5">
+                            <span className="text-gray-300 mt-0.5 flex-none">›</span>{d}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="border-l border-gray-200 self-stretch" />
+
+                {/* Campaign structure — cols 3 & 4 */}
+                <div className="grid grid-cols-2 gap-5 flex-1">
+                  {/* Col 3: campaigns #1, #2, optional */}
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-xs font-bold text-gray-700 mb-1.5">#1 SALE - NEW ASC - RS - Purchase Excl</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-gray-700 mb-1.5">#2 SALE - MOF - Split Mid - ABO - Purchase<br/><span className="font-normal text-gray-500">(Exclude existing customers)</span></div>
+                      <ul className="space-y-0.5">
+                        {['All Instagram Engagement','All Facebook Engagement','3 Second Video Views','95% Video Views','All Email List','180 Day Website Visits'].map(d => (
+                          <li key={d} className="text-xs text-gray-500 flex items-start gap-1.5"><span className="text-gray-300 mt-0.5 flex-none">›</span>{d}</li>
+                        ))}
+                        <li className="text-xs text-gray-400 flex items-start gap-1.5 italic"><span className="text-gray-300 mt-0.5 flex-none">›</span>Optional — test more Social Audiences like All Instagram Followers, All Facebook Likes &amp; Follows, Sent a DM, etc</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-gray-500 mb-1.5 uppercase tracking-wide" style={{fontSize:'10px'}}>Optional</div>
+                      <ul className="space-y-0.5">
+                        {['SALE - Old ASC (10–20% Customer Cap) — Reuse old one','SALE - BOF - Reach - Ad Recall Lift'].map(d => (
+                          <li key={d} className="text-xs text-gray-400 flex items-start gap-1.5 italic"><span className="text-gray-300 mt-0.5 flex-none">›</span>{d}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  {/* Col 4: campaigns #3 and #4 */}
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-xs font-bold text-gray-700 mb-1.5">#3 SALE - MOF - ALL MID - ABO<br/><span className="font-normal text-gray-500">(Split Objectives — Exclude existing customers)</span></div>
+                      <ul className="space-y-0.5">
+                        {['Purchase (Highest Budget)','Initiate Checkout','Add to Cart','View Content'].map(d => (
+                          <li key={d} className="text-xs text-gray-500 flex items-start gap-1.5"><span className="text-gray-300 mt-0.5 flex-none">›</span>{d}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-gray-700 mb-1.5">#4 SALE - BOF - ALL BOF - ABO<br/><span className="font-normal text-gray-500">(Split Objectives — ONLY existing customers)</span></div>
+                      <ul className="space-y-0.5">
+                        {['Purchase (Highest Budget)','Initiate Checkout','Add to Cart','View Content'].map(d => (
+                          <li key={d} className="text-xs text-gray-500 flex items-start gap-1.5"><span className="text-gray-300 mt-0.5 flex-none">›</span>{d}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          </>}
+        </div>
+      );
+    }
+
+    // ── row computation ───────────────────────────────────────────────────────
+    function computeRow(rowData, audienceSize) {
+      const reach = parseNum(rowData.reach);
+      const spend = parseNum(rowData.spend);
+      const impr  = parseNum(rowData.impressions);
+      const hasAud = audienceSize !== null && audienceSize > 0;
+      return {
+        saturation: (hasAud && reach > 0) ? safe(reach / audienceSize) : null,
+        frequency:  reach > 0 ? safe(impr / reach) : null,
+        cpm:        impr  > 0 ? safe((spend / impr) * 1000) : null,
+        cp1000r:    reach > 0 ? safe((spend / reach) * 1000) : null,
+        costX1:     (hasAud && reach > 0) ? safe((spend / reach) * audienceSize) : null,
+        costX2:     (hasAud && reach > 0) ? safe((spend / reach) * audienceSize * 2) : null,
+        costX3:     (hasAud && reach > 0) ? safe((spend / reach) * audienceSize * 3) : null,
+      };
+    }
+
+    // ── Campaign section (Purchase Only / All Objectives) ─────────────────────
+    function CampaignSection({ title, sectionNum, data, onChange, audiences, showTips = true }) {
+      const audSizes = {
+        mofbofCombined: audienceAvg(audiences.mofbofCombined),
+        mofbofExcl:     audienceAvg(audiences.mofbofExcl),
+        engaged:        audienceAvg(audiences.engaged),
+        existing:       audienceAvg(audiences.existing),
+      };
+
+      const computed = ROWS.map(row => ({
+        key: row.key,
+        ...computeRow(data[row.key], row.audienceKey ? audSizes[row.audienceKey] : null),
+      }));
+
+      const totalSpend = parseNum(data.mofbofCombined.spend);
+      const revenue    = parseNum(data.revenue);
+      const mer        = revenue > 0 ? safe(totalSpend / revenue) : null;
+
+      const CAL = 'px-3 py-2 text-right text-xs text-gray-700 calc-cell';
+      const SAT_CELL = (sat) => {
+        if (sat === null) return CAL;
+        const p = sat * 100;
+        if (p < 20) return 'px-3 py-2 text-right text-xs font-semibold ee-red-bg ee-red';
+        if (p < 30) return 'px-3 py-2 text-right text-xs font-semibold bg-amber-100 ee-amber-text';
+        return 'px-3 py-2 text-right text-xs font-semibold bg-green-100 text-green-700';
+      };
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5" style={{backgroundColor:'#0E318E'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">
+              {sectionNum}. {title}
+              {title.includes('Naughty') && (
+                <Tip text="'Naughty objectives' = non-purchase campaign objectives used alongside purchase campaigns. Preferred: Add to Cart, View Content, Initiate Checkout. Optional: Landing Page Views (optimising for sales, not traffic:so you can see audience breakdowns). Not recommended: Traffic, Engagement, Reach/Awareness (these inflate your saturation rate and reach lower-quality audiences)." />
+              )}
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{minWidth:'1120px'}}>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 uppercase tracking-wide" style={{width:'190px'}}>Audience</th>
+                  <th className="text-right px-2 py-2.5 font-semibold text-gray-600 uppercase tracking-wide w-28">Reach {showTips && <Tip text="Unique people reached. Pull from your hype campaign in Meta:hype period only. Exclude any top-of-funnel campaigns; focus on mid and bottom funnel only." />}</th>
+                  <th className="text-right px-2 py-2.5 font-semibold text-gray-600 uppercase tracking-wide w-28">Spend ($) {showTips && <Tip text="Total spend for this audience row during the hype period. Pull directly from Meta campaign or ad set breakdown." />}</th>
+                  <th className="text-right px-2 py-2.5 font-semibold text-gray-600 uppercase tracking-wide w-28">Impressions {showTips && <Tip text="Total impressions delivered. Unlike Reach, this counts repeat views:the same person seeing the ad multiple times." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-24 bg-gray-100">Sat. Rate {showTips && <Tip text="Reach ÷ Audience Size. What % of this audience did you actually reach? Goal: 30%+ overall. Under 20% means you're not reaching enough." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-20 bg-gray-100">Freq. {showTips && <Tip text="Impressions ÷ Reach. How many times the average person saw your ad. High frequency with low saturation rate means you're hitting the same people repeatedly rather than reaching more of your audience." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-24 bg-gray-100">CPM {showTips && <Tip text="Cost per 1,000 impressions. Useful for comparing efficiency across campaigns. Naughty objectives typically have lower CPMs than purchase campaigns." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-24 bg-gray-100">CP/1000R {showTips && <Tip text="Cost per 1,000 unique people reached. More meaningful than CPM for hype:you care about reaching new unique people, not just serving impressions." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-28 bg-gray-100">Cost ×1 {showTips && <Tip text="Estimated cost to reach your entire audience once at this campaign's efficiency. (Spend ÷ Reach) × Audience Size." />}</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-28 bg-gray-100">Cost ×2</th>
+                  <th className="text-right px-3 py-2.5 font-semibold text-gray-500 uppercase tracking-wide w-28 bg-gray-100">Cost ×3</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ROWS.map((row, i) => {
+                  const c = computed.find(x => x.key === row.key);
+                  const isNew = row.audienceKey === null;
+                  return (
+                    <tr key={row.key} className={`border-b border-gray-100 ${i % 2 === 1 ? 'bg-gray-50' : ''}`}>
+                      <td className="px-3 py-1.5 text-gray-800">
+                        {row.label}
+                        {row.key === 'new' && <Tip text="New audience: people with no prior engagement or purchase history. Saturation rate is N/A because there's no fixed audience size to measure against. Still useful to see how much of your hype spend is going to new people." />}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <NumInput value={data[row.key].reach}       onChange={v => onChange(row.key, 'reach',       v)} />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <NumInput value={data[row.key].spend}       onChange={v => onChange(row.key, 'spend',       v)} dollarFormat />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <NumInput value={data[row.key].impressions} onChange={v => onChange(row.key, 'impressions', v)} />
+                      </td>
+                      <td className={isNew ? CAL : SAT_CELL(c.saturation)}>{isNew ? <span className="text-gray-400">N/A</span> : show(c.saturation, fmtPct)}</td>
+                      <td className={CAL}>{show(c.frequency, n => fmtDec(n, 2))}</td>
+                      <td className={CAL}>{show(c.cpm,       fmtDollar)}</td>
+                      <td className={CAL}>{show(c.cp1000r,   fmtDollar)}</td>
+                      <td className={CAL}>{isNew ? <span className="text-gray-400">N/A</span> : show(c.costX1, fmtDollar)}</td>
+                      <td className={CAL}>{isNew ? <span className="text-gray-400">N/A</span> : show(c.costX2, fmtDollar)}</td>
+                      <td className={CAL}>{isNew ? <span className="text-gray-400">N/A</span> : show(c.costX3, fmtDollar)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-gray-50">
+                  <td className="px-3 py-2 text-xs font-semibold text-gray-600">
+                    Revenue Attributed in Meta
+                    <Tip text="The revenue Meta reports for this campaign during the hype period. This is attribution-dependent and not always exact:treat as a guideline. The MER it produces is useful for comparison but not a source of truth." />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <NumInput value={data.revenue} onChange={v => onChange(null, 'revenue', v)} dollarFormat />
+                  </td>
+                  <td colSpan={2} className="px-3 py-2 text-right whitespace-nowrap">
+                    <span className="text-xs text-gray-500 mr-1">Total Spend</span>
+                    <span className="text-xs font-bold text-gray-900 mr-4">{fmtDollar(totalSpend)}</span>
+                    <span className="text-xs text-gray-500 mr-1">MER</span>
+                    <span className="text-xs font-bold text-gray-900">{show(mer, n => fmtDec(n * 100, 1) + '%')}</span>
+                  </td>
+                  <td colSpan={7} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Difference section ────────────────────────────────────────────────────
+    function DifferenceSection({ purchaseData, allObjData, audiences }) {
+      const audSizes = {
+        mofbofCombined: audienceAvg(audiences.mofbofCombined),
+        mofbofExcl:     audienceAvg(audiences.mofbofExcl),
+        engaged:        audienceAvg(audiences.engaged),
+        existing:       audienceAvg(audiences.existing),
+      };
+
+      const diffNum = (a, b) => (a !== null && b !== null) ? a - b : null;
+
+      const rows = ROWS.map(row => {
+        const audSize = row.audienceKey ? audSizes[row.audienceKey] : null;
+        const po = computeRow(purchaseData[row.key], audSize);
+        const ao = computeRow(allObjData[row.key],   audSize);
+        return {
+          key:        row.key,
+          label:      row.label,
+          isNew:      row.audienceKey === null,
+          reach:      parseNum(allObjData[row.key].reach)       - parseNum(purchaseData[row.key].reach),
+          spend:      parseNum(allObjData[row.key].spend)       - parseNum(purchaseData[row.key].spend),
+          impressions:parseNum(allObjData[row.key].impressions) - parseNum(purchaseData[row.key].impressions),
+          saturation: diffNum(ao.saturation, po.saturation),
+          frequency:  diffNum(ao.frequency,  po.frequency),
+          cpm:        diffNum(ao.cpm,        po.cpm),
+          cp1000r:    diffNum(ao.cp1000r,    po.cp1000r),
+        };
+      });
+
+      const cell = (val, fmt, alwaysShow = false) => {
+        if (!alwaysShow && (val === null || val === undefined)) return null;
+        if (val === null || val === undefined) return null;
+        const cls = val > 0 ? 'diff-pos' : val < 0 ? 'diff-neg' : 'text-gray-500';
+        const prefix = val > 0 ? '+' : '';
+        return <span className={cls}>{prefix}{fmt(val)}</span>;
+      };
+
+      // td background: positive=good (sat rate), negative=good (cost metrics)
+      const satTd  = (val) => val === null ? TD : val > 0 ? TD + ' bg-green-100' : val < 0 ? TD + ' ee-red-bg'   : TD;
+      const costTd = (val) => val === null ? TD : val < 0 ? TD + ' bg-green-100' : val > 0 ? TD + ' ee-red-bg'   : TD;
+
+      const TH = 'text-right px-3 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide';
+      const TD = 'text-right px-3 py-2 text-xs';
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5" style={{backgroundColor:'#232A33'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">4. Difference:All Objectives minus Purchase Only</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{minWidth:'1120px'}}>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide" style={{width:'190px'}}>Audience</th>
+                  <th className={TH + ' w-28'}>Reach</th>
+                  <th className={TH + ' w-28'}>Spend</th>
+                  <th className={TH + ' w-28'}>Impressions</th>
+                  <th className={TH + ' w-24'}>Sat. Rate</th>
+                  <th className={TH + ' w-20'}>Freq.</th>
+                  <th className={TH + ' w-24'}>CPM</th>
+                  <th className={TH + ' w-24'}>CP/1000R</th>
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={row.key} className={`border-b border-gray-100 ${i % 2 === 1 ? 'bg-gray-50' : ''}`}>
+                    <td className="px-3 py-2 text-gray-800">{row.label}</td>
+                    <td className={TD}>{cell(row.reach,       fmtInt, true)}</td>
+                    <td className={TD}>{cell(row.spend,       fmtDollarSigned, true)}</td>
+                    <td className={TD}>{cell(row.impressions, fmtInt, true)}</td>
+                    <td className={row.isNew ? TD : satTd(row.saturation)}>{row.isNew ? <span className="text-gray-300">N/A</span> : cell(row.saturation, fmtPct)}</td>
+                    <td className={TD}>{cell(row.frequency,  n => fmtDec(n, 2))}</td>
+                    <td className={costTd(row.cpm)}>{cell(row.cpm,     fmtDollarSigned)}</td>
+                    <td className={costTd(row.cp1000r)}>{cell(row.cp1000r, fmtDollarSigned)}</td>
+                    <td className="bg-gray-100" />
+                    <td className="bg-gray-100" />
+                    <td className="bg-gray-100" />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Benchmark indicator ───────────────────────────────────────────────────
+    function BenchmarkIndicator({ allObjData, audiences }) {
+      const audSize = audienceAvg(audiences.mofbofExcl);
+      const reach   = parseNum(allObjData.mofbofExcl.reach);
+      const satRate = (audSize > 0 && reach > 0) ? reach / audSize : null;
+      const pct     = satRate !== null ? satRate * 100 : null;
+
+      const zone = pct === null ? null
+        : pct < 20 ? { label: 'Not reaching enough', color: 'ee-red-solid',  textColor: 'ee-red',         bg: 'ee-red-faint', border: 'ee-red-border' }
+        : pct < 50 ? { label: 'Decent',              color: 'bg-amber-400', textColor: 'ee-amber-text',  bg: 'bg-amber-50',  border: 'border-amber-200' }
+        :             { label: 'Good',               color: 'bg-green-500', textColor: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-200' };
+
+      // Scale: 0% → 0, 80%+ → 100% bar width
+      const markerPos = pct !== null ? Math.min((pct / 80) * 100, 100) : 0;
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5" style={{backgroundColor:'#232A33'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">5. Saturation Rate Benchmark</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Primary metric: MOF/BOF Excl. Video Views — All Objectives
+              <Tip text="We use Excl. Video Views because including video views (especially 3-second) can overinflate your saturation rate — those people may just be scrolling past. All Objectives is used as the baseline because it captures the full picture of your hype reach across all campaign types. Goal is 30–50%. Under 20% means something is off with your hype strategy. Avoid using Reach or Awareness campaigns — they can show 90%+ saturation which is misleading." />
+            </p>
+          </div>
+          <div className="p-5">
+            {satRate === null ? (
+              <p className="text-sm text-gray-400 py-4 text-center">Enter Reach for MOF/BOF Excl. Video Views (All Objectives) and the audience size to see the benchmark.</p>
+            ) : (
+              <div className="space-y-5">
+                {/* result card */}
+                <div className={`rounded-xl px-5 py-4 border ${zone.bg} ${zone.border} flex items-center justify-between`}>
+                  <div>
+                    <div className={`text-3xl font-bold ${zone.textColor}`}>{fmtPct(satRate)}</div>
+                    <div className={`text-sm font-semibold mt-0.5 ${zone.textColor}`}>{zone.label}</div>
+                  </div>
+                  <div className="text-right text-xs text-gray-400">
+                    <div>Reach: {fmtInt(reach)}</div>
+                    <div>Audience: {fmtInt(audSize)}</div>
+                  </div>
+                </div>
+
+                {/* bar */}
+                <div>
+                  <div className="flex text-xs text-gray-400 justify-between mb-1.5 px-0.5">
+                    <span>0%</span>
+                    <span className="ee-red font-medium">20%</span>
+                    <span className="ee-amber-text font-medium">50%</span>
+                    <span>80%+</span>
+                  </div>
+                  <div className="relative">
+                    <div className="h-10 rounded-full overflow-hidden flex">
+                      <div className="ee-red-bar flex items-center justify-center overflow-hidden" style={{width: '25%'}}>
+                        <span className="text-xs font-semibold ee-red whitespace-nowrap px-2">Not reaching enough</span>
+                      </div>
+                      <div className="bg-amber-200 flex items-center justify-center overflow-hidden" style={{width: '37.5%'}}>
+                        <span className="text-xs font-semibold ee-amber-text whitespace-nowrap px-2">Decent</span>
+                      </div>
+                      <div className="bg-green-200 flex items-center justify-center overflow-hidden" style={{width: '37.5%'}}>
+                        <span className="text-xs font-semibold text-green-700 whitespace-nowrap px-2">Good</span>
+                      </div>
+                    </div>
+                    <div
+                      className="absolute inset-y-0 w-0.5 bg-gray-800 rounded"
+                      style={{left: `${markerPos}%`, transform: 'translateX(-50%)'}}
+                    />
+                  </div>
+                  <div className="relative h-6 mt-1">
+                    <div
+                      className="absolute text-xs font-bold text-gray-800 -translate-x-1/2"
+                      style={{left: `${markerPos}%`}}
+                    >
+                      {fmtPct(satRate)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Recommendations panel ─────────────────────────────────────────────────
+    function Recommendations({ allObjData, audiences }) {
+      const audSizes = {
+        mofbofCombined: audienceAvg(audiences.mofbofCombined),
+        mofbofExcl:     audienceAvg(audiences.mofbofExcl),
+        engaged:        audienceAvg(audiences.engaged),
+        existing:       audienceAvg(audiences.existing),
+      };
+
+      const rows = ROWS.map(row => {
+        const audSize = row.audienceKey ? audSizes[row.audienceKey] : null;
+        const reach = parseNum(allObjData[row.key].reach);
+        const spend = parseNum(allObjData[row.key].spend);
+        const impr  = parseNum(allObjData[row.key].impressions);
+        const sat   = (audSize && reach) ? reach / audSize : null;
+        const freq  = reach > 0 ? impr / reach : null;
+        const cp1000r = reach > 0 ? (spend / reach) * 1000 : null;
+        return { key: row.key, label: row.label, sat, freq, spend, reach, audSize, cp1000r, isNew: !row.audienceKey };
+      });
+
+      const hasData = rows.some(r => r.reach > 0);
+      if (!hasData) return null;
+
+      const FREQ_IDEAL = {
+        mofbofCombined: [3, 6],
+        mofbofExcl: [3, 6],
+        engaged: [2, 5],
+        existing: [4, 8],
+        new: [1.5, 3],
+      };
+
+      const recs = rows.filter(r => r.reach > 0).map(r => {
+        const ideal = FREQ_IDEAL[r.key] || [2, 5];
+        const satPct = r.sat !== null ? r.sat * 100 : null;
+        let action = '';
+        let detail = '';
+        let color = '';
+
+        if (r.isNew) {
+          if (r.freq > ideal[1]) {
+            action = 'Pull back';
+            detail = `Frequency ${r.freq.toFixed(2)}x is above ${ideal[1]}x for cold traffic. Pool may be too small or spend too high.`;
+            color = 'ee-red';
+          } else {
+            action = 'Monitor';
+            detail = `Frequency ${r.freq.toFixed(2)}x is healthy for cold. No audience size to measure saturation.`;
+            color = 'text-gray-500';
+          }
+        } else if (satPct < 20) {
+          action = 'Push harder';
+          detail = `Only ${satPct.toFixed(1)}% saturated. Under-delivering. Increase budget to reach more of this pool.`;
+          color = 'ee-red';
+        } else if (satPct < 30) {
+          if (r.freq < ideal[0]) {
+            action = 'Scale spend';
+            detail = `${satPct.toFixed(1)}% saturated, frequency ${r.freq.toFixed(2)}x is below ideal ${ideal[0]}x. Room to push budget and frequency.`;
+            color = 'text-amber-600';
+          } else {
+            action = 'Scale spend';
+            detail = `${satPct.toFixed(1)}% saturated. Frequency is healthy at ${r.freq.toFixed(2)}x. Safe to increase budget.`;
+            color = 'text-amber-600';
+          }
+        } else if (satPct < 50) {
+          if (r.freq > ideal[1]) {
+            action = 'Rotate creatives';
+            detail = `${satPct.toFixed(1)}% saturated but frequency ${r.freq.toFixed(2)}x exceeds ideal ${ideal[1]}x. Audience is seeing same ads too much.`;
+            color = 'text-amber-600';
+          } else if (r.freq < ideal[0]) {
+            action = 'Scale spend';
+            detail = `${satPct.toFixed(1)}% saturated, frequency only ${r.freq.toFixed(2)}x. Plenty of room to push harder before fatigue.`;
+            color = 'text-green-600';
+          } else {
+            action = 'Hold or scale slightly';
+            detail = `${satPct.toFixed(1)}% saturated, frequency ${r.freq.toFixed(2)}x in range. Healthy zone, can push 10-15% more.`;
+            color = 'text-green-600';
+          }
+        } else {
+          if (r.freq > ideal[1]) {
+            action = 'Hold steady';
+            detail = `${satPct.toFixed(1)}% saturated with ${r.freq.toFixed(2)}x frequency. Strong penetration, but creative fatigue risk. Maintain or rotate.`;
+            color = 'text-green-700';
+          } else {
+            action = 'Hold steady';
+            detail = `${satPct.toFixed(1)}% saturated. Great penetration. Frequency ${r.freq.toFixed(2)}x still in range. You're in a good spot.`;
+            color = 'text-green-700';
+          }
+        }
+
+        return { ...r, action, detail, color };
+      });
+
+      // Overall
+      const satRows = recs.filter(r => !r.isNew && r.sat !== null);
+      const benchmarkRow = recs.find(r => r.key === 'mofbofExcl');
+      const benchPct = benchmarkRow && benchmarkRow.sat ? benchmarkRow.sat * 100 : null;
+      const underPerformers = satRows.filter(r => r.sat * 100 < 30);
+      const totalSpend = rows.reduce((sum, r) => sum + r.spend, 0);
+
+      let overallMsg = '';
+      if (benchPct !== null) {
+        if (benchPct < 20) {
+          overallMsg = 'Benchmark is in the red. You need to significantly increase spend on MOF/BOF to reach more of the pool. Consider broadening naughty objectives or adding fresh creative to unlock delivery.';
+        } else if (benchPct < 50) {
+          const needed = Math.round(audSizes.mofbofExcl * 0.5 - parseNum(allObjData.mofbofExcl.reach));
+          const cost = benchmarkRow.cp1000r ? Math.round((needed / 1000) * benchmarkRow.cp1000r) : null;
+          overallMsg = `Benchmark at ${benchPct.toFixed(1)}%. Need ~${needed > 0 ? needed.toLocaleString() : '0'} more unique reach to hit 50%.`;
+          if (cost && needed > 0) overallMsg += ` At current CP/1000R of $${benchmarkRow.cp1000r.toFixed(0)}, that costs roughly $${cost.toLocaleString()}.`;
+        } else {
+          overallMsg = `Benchmark at ${benchPct.toFixed(1)}%. You've hit good penetration. Focus on maintaining frequency in range and rotating creative to keep engagement fresh.`;
+        }
+      }
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5" style={{backgroundColor:'#16a34a'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">6. Recommendations</h3>
+            <p className="text-xs text-green-200 mt-0.5">Auto-generated based on saturation and frequency data</p>
+          </div>
+          <div className="p-5 space-y-3">
+            {recs.map(r => (
+              <div key={r.key} className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
+                <div className="w-44 flex-none">
+                  <div className="text-xs font-semibold text-gray-800">{r.label}</div>
+                  <div className={`text-xs font-bold ${r.color}`}>{r.action}</div>
+                </div>
+                <div className="text-xs text-gray-600 leading-relaxed">{r.detail}</div>
+              </div>
+            ))}
+            {overallMsg && (
+              <div className="mt-4 pt-4 border-t-2 border-gray-200">
+                <div className="text-xs font-bold text-gray-800 uppercase tracking-wide mb-1">Overall</div>
+                <div className="text-sm text-gray-700 leading-relaxed">{overallMsg}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+    const emptySection = () => ({
+      mofbofCombined: { reach: '', spend: '', impressions: '' },
+      mofbofExcl:     { reach: '', spend: '', impressions: '' },
+      new:            { reach: '', spend: '', impressions: '' },
+      engaged:        { reach: '', spend: '', impressions: '' },
+      existing:       { reach: '', spend: '', impressions: '' },
+      revenue: '',
+    });
+
+    const emptyAudiences = () => ({
+      mofbofCombined: { low: '', high: '' },
+      mofbofExcl:     { low: '', high: '' },
+      engaged:        { low: '', high: '' },
+      existing:       { low: '', high: '' },
+    });
+
+    const emptyDay = () => ({ purchase: emptySection(), allObj: emptySection() });
+
+    // ── Day-over-Day Summary ──────────────────────────────────────────────────
+    function DaySummarySection({ days, audiences, summaryDayIdx, setSummaryDayIdx }) {
+      const audSizes = {
+        mofbofCombined: audienceAvg(audiences.mofbofCombined),
+        mofbofExcl:     audienceAvg(audiences.mofbofExcl),
+        engaged:        audienceAvg(audiences.engaged),
+        existing:       audienceAvg(audiences.existing),
+      };
+
+      const safeSummaryIdx = Math.min(summaryDayIdx, days.length - 1);
+      const dayA = days[safeSummaryIdx - 1];
+      const dayB = days[safeSummaryIdx];
+
+      const diffNum = (a, b) => (a !== null && b !== null) ? b - a : null;
+
+      const rows = ROWS.map(row => {
+        const audSize = row.audienceKey ? audSizes[row.audienceKey] : null;
+        const mA = computeRow(dayA.allObj[row.key], audSize);
+        const mB = computeRow(dayB.allObj[row.key], audSize);
+        return {
+          key:         row.key,
+          label:       row.label,
+          isNew:       row.audienceKey === null,
+          reach:       parseNum(dayB.allObj[row.key].reach)       - parseNum(dayA.allObj[row.key].reach),
+          spend:       parseNum(dayB.allObj[row.key].spend)       - parseNum(dayA.allObj[row.key].spend),
+          impressions: parseNum(dayB.allObj[row.key].impressions) - parseNum(dayA.allObj[row.key].impressions),
+          saturation:  diffNum(mA.saturation, mB.saturation),
+          frequency:   diffNum(mA.frequency,  mB.frequency),
+          cpm:         diffNum(mA.cpm,        mB.cpm),
+          cp1000r:     diffNum(mA.cp1000r,    mB.cp1000r),
+        };
+      });
+
+      const cell = (val, fmt) => {
+        if (val === null || val === undefined) return null;
+        const cls = val > 0 ? 'diff-pos' : val < 0 ? 'diff-neg' : 'text-gray-500';
+        const prefix = val > 0 ? '+' : '';
+        return <span className={cls}>{prefix}{fmt(val)}</span>;
+      };
+
+      const TH = 'text-right px-3 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide';
+      const TD = 'text-right px-3 py-2 text-xs';
+      const satTd  = (val) => val === null ? TD : val > 0 ? TD + ' bg-green-100' : val < 0 ? TD + ' ee-red-bg' : TD;
+      const costTd = (val) => val === null ? TD : val < 0 ? TD + ' bg-green-100' : val > 0 ? TD + ' ee-red-bg' : TD;
+
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="text-white px-5 py-3.5" style={{backgroundColor:'#232A33'}}>
+            <h3 className="font-bold text-sm tracking-widest uppercase">Day-over-Day Summary</h3>
+          </div>
+          <div className="px-5 pt-4 pb-2 flex items-center gap-2 flex-wrap border-b border-gray-100">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">Compare to day prior:</span>
+            {days.slice(1).map((_, i) => {
+              const idx = i + 1;
+              const active = safeSummaryIdx === idx;
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setSummaryDayIdx(idx)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                    active ? 'text-white border-transparent' : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                  }`}
+                  style={active ? {backgroundColor:'#232A33'} : {}}
+                >
+                  Hype {idx + 1}
+                </button>
+              );
+            })}
+            <span className="text-xs text-gray-400 ml-1">All Objectives · Hype {safeSummaryIdx + 1} vs Hype {safeSummaryIdx}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{minWidth:'1120px'}}>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-3 py-2.5 font-semibold text-gray-600 text-xs uppercase tracking-wide" style={{width:'190px'}}>Audience</th>
+                  <th className={TH + ' w-28'}>Reach</th>
+                  <th className={TH + ' w-28'}>Spend</th>
+                  <th className={TH + ' w-28'}>Impressions</th>
+                  <th className={TH + ' w-24'}>Sat. Rate</th>
+                  <th className={TH + ' w-20'}>Freq.</th>
+                  <th className={TH + ' w-24'}>CPM</th>
+                  <th className={TH + ' w-24'}>CP/1000R</th>
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                  <th className="w-28 bg-gray-100" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={row.key} className={`border-b border-gray-100 ${i % 2 === 1 ? 'bg-gray-50' : ''}`}>
+                    <td className="px-3 py-2 text-gray-800">{row.label}</td>
+                    <td className={TD}>{cell(row.reach,       fmtInt)}</td>
+                    <td className={TD}>{cell(row.spend,       fmtDollarSigned)}</td>
+                    <td className={TD}>{cell(row.impressions, fmtInt)}</td>
+                    <td className={row.isNew ? TD : satTd(row.saturation)}>{row.isNew ? <span className="text-gray-300">N/A</span> : cell(row.saturation, fmtPct)}</td>
+                    <td className={TD}>{cell(row.frequency,  n => fmtDec(n, 2))}</td>
+                    <td className={costTd(row.cpm)}>{cell(row.cpm,     fmtDollarSigned)}</td>
+                    <td className={costTd(row.cp1000r)}>{cell(row.cp1000r, fmtDollarSigned)}</td>
+                    <td className="bg-gray-100" />
+                    <td className="bg-gray-100" />
+                    <td className="bg-gray-100" />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Saturation Rate Calculator ────────────────────────────────────────────
+    function SaturationCalc({ session, setSession, audiences, setAudiences, days, setDays, resetKey, onReset, activeLabel, loadPreview, handleMySale }) {
+      const [activeDayIdx,   setActiveDayIdx]   = React.useState(0);
+      const [showSummary,    setShowSummary]     = React.useState(false);
+      const [summaryDayIdx,  setSummaryDayIdx]   = React.useState(1);
+      const [showTotalHype,  setShowTotalHype]   = React.useState(false);
+      const [totalHype,      setTotalHype]       = React.useState(emptyDay());
+      const [printMode,      setPrintMode]       = React.useState(false);
+
+      const handlePrint = () => {
+        setPrintMode(true);
+        setTimeout(() => { window.print(); setPrintMode(false); }, 80);
+      };
+
+      React.useEffect(() => {
+        setActiveDayIdx(0);
+        setShowSummary(false);
+        setSummaryDayIdx(1);
+        setShowTotalHype(false);
+        setTotalHype(emptyDay());
+      }, [resetKey]);
+
+      const handleAudience = (key, field, val) =>
+        setAudiences(prev => ({ ...prev, [key]: { ...prev[key], [field]: val } }));
+
+      const makeTotalHypeHandler = (section) => (rowKey, field, val) => {
+        setTotalHype(prev => {
+          const updated = { ...prev };
+          if (rowKey === null) {
+            updated[section] = { ...updated[section], [field]: val };
+          } else {
+            updated[section] = { ...updated[section], [rowKey]: { ...updated[section][rowKey], [field]: val } };
+          }
+          return updated;
+        });
+      };
+
+      const makeSectionHandler = (dayIdx, section) => (rowKey, field, val) => {
+        setDays(prev => {
+          const next = [...prev];
+          const day = { ...next[dayIdx] };
+          if (rowKey === null) {
+            day[section] = { ...day[section], [field]: val };
+          } else {
+            day[section] = { ...day[section], [rowKey]: { ...day[section][rowKey], [field]: val } };
+          }
+          next[dayIdx] = day;
+          return next;
+        });
+      };
+
+      const addDay = () => {
+        if (days.length < 7) {
+          const newIdx = days.length;
+          setDays(prev => [...prev, emptyDay()]);
+          setActiveDayIdx(newIdx);
+          setShowSummary(false);
+        }
+      };
+
+      const removeDay = (e, i) => {
+        e.stopPropagation();
+        if (!window.confirm(`Are you sure you want to remove Hype ${i + 1}?`)) return;
+        setDays(prev => prev.filter((_, idx) => idx !== i));
+        setActiveDayIdx(prev => {
+          if (prev >= i) return Math.max(0, prev - 1);
+          return prev;
+        });
+        setShowSummary(false);
+        setSummaryDayIdx(prev => Math.max(1, prev >= i ? prev - 1 : prev));
+      };
+
+      const safeActiveDayIdx = Math.min(activeDayIdx, days.length - 1);
+      const activeDay = days[safeActiveDayIdx];
+
+      return (
+        <div className="space-y-4">
+          {/* session header */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-5 py-4">
+            <div className="flex flex-wrap gap-5 items-end">
+
+              {/* Brand */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Brand</label>
+                <input
+                  type="text"
+                  value={session.brand}
+                  onChange={e => setSession(p => ({...p, brand: e.target.value}))}
+                  placeholder="Brand name"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 w-48"
+                />
+              </div>
+
+              {/* Sale Type */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sale Type</label>
+                <div className="flex gap-2">
+                  <select
+                    value={session.saleType || ''}
+                    onChange={e => setSession(p => ({...p, saleType: e.target.value, saleTypeOther: ''}))}
+                    className={`px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 bg-white ${!session.saleType ? 'text-gray-300' : 'text-gray-800'}`}
+                  >
+                    <option value="">Select...</option>
+                    <option>BFCM</option>
+                    <option>Mid Year</option>
+                    <option>3rd Peak</option>
+                    <option value="other">Other</option>
+                  </select>
+                  {session.saleType === 'other' && (
+                    <input
+                      type="text"
+                      value={session.saleTypeOther || ''}
+                      onChange={e => setSession(p => ({...p, saleTypeOther: e.target.value}))}
+                      placeholder="Describe"
+                      className="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 w-32"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Sale Date */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sale Date</label>
+                <input
+                  type="text"
+                  value={session.saleDate}
+                  onChange={e => setSession(p => ({...p, saleDate: e.target.value}))}
+                  placeholder="e.g. Jun 2025"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 w-32"
+                />
+              </div>
+
+              {/* Offer Type */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Offer Type</label>
+                <div className="flex gap-2">
+                  <select
+                    value={session.offerType || ''}
+                    onChange={e => setSession(p => ({...p, offerType: e.target.value, offerTypeOther: ''}))}
+                    className={`px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 bg-white ${!session.offerType ? 'text-gray-300' : 'text-gray-800'}`}
+                  >
+                    <option value="">Select...</option>
+                    <option value="up_to_pct">Up to X% off</option>
+                    <option value="range_pct">X – Y% Off</option>
+                    <option value="sitewide_pct">X% off sitewide</option>
+                    <option value="flash">X for X Hours/Minutes</option>
+                    <option value="other">Other</option>
+                  </select>
+                  {session.offerType === 'other' && (
+                    <input
+                      type="text"
+                      value={session.offerTypeOther || ''}
+                      onChange={e => setSession(p => ({...p, offerTypeOther: e.target.value}))}
+                      placeholder="Describe"
+                      className="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 w-32"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Industry / Category */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Industry / Category</label>
+                <div className="flex gap-2">
+                  <select
+                    value={session.industry || ''}
+                    onChange={e => setSession(p => ({...p, industry: e.target.value, industryOther: ''}))}
+                    className={`px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 bg-white ${!session.industry ? 'text-gray-300' : 'text-gray-800'}`}
+                  >
+                    <option value="">Select...</option>
+                    <option>Apparel</option>
+                    <option>Art</option>
+                    <option>Baby &amp; Kids</option>
+                    <option>Bags &amp; Accessories</option>
+                    <option>Eyewear</option>
+                    <option>Fashion</option>
+                    <option>Food &amp; Bev</option>
+                    <option>Footwear</option>
+                    <option>Health &amp; Personal Care</option>
+                    <option>Hobbies &amp; Stationary</option>
+                    <option>Home &amp; Living</option>
+                    <option>Jewellery</option>
+                    <option>Makeup &amp; Fragrance</option>
+                    <option>Phone &amp; Computer</option>
+                    <option>Pet Care</option>
+                    <option>Sports &amp; Travel</option>
+                    <option>Swimwear</option>
+                    <option>Toys, Games, Collectibles</option>
+                    <option>Underwear / Lingerie</option>
+                    <option value="other">Other</option>
+                  </select>
+                  {session.industry === 'other' && (
+                    <input
+                      type="text"
+                      value={session.industryOther || ''}
+                      onChange={e => setSession(p => ({...p, industryOther: e.target.value}))}
+                      placeholder="Describe"
+                      className="px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-gray-500 w-32"
+                    />
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <AudienceSection audiences={audiences} onChange={handleAudience} />
+
+          {/* Day tab bar */}
+          <div className="no-print flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex gap-2 items-center flex-wrap">
+              {days.map((_, i) => {
+                const active = !showSummary && !showTotalHype && safeActiveDayIdx === i;
+                return (
+                  <div
+                    key={i}
+                    onClick={() => { setActiveDayIdx(i); setShowSummary(false); setShowTotalHype(false); }}
+                    className={`flex items-center justify-center gap-1.5 w-28 py-2 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                      active ? 'text-white border-transparent' : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                    }`}
+                    style={active ? {backgroundColor:'#0E318E'} : {}}
+                  >
+                    Hype {i + 1}
+                    {i > 0 && (
+                      <span
+                        onClick={(e) => removeDay(e, i)}
+                        className={`ml-0.5 w-4 h-4 rounded-full inline-flex items-center justify-center leading-none transition-colors cursor-pointer ${
+                          active ? 'hover:bg-white/20 text-white/70 hover:text-white' : 'hover:bg-gray-300 text-gray-400 hover:text-gray-600'
+                        }`}
+                        style={{fontSize:'10px'}}
+                      >×</span>
+                    )}
+                  </div>
+                );
+              })}
+              {days.length < 7 && (
+                <button
+                  onClick={addDay}
+                  className="w-28 py-2 text-xs font-semibold rounded-lg border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors"
+                >
+                  + Add Day
+                </button>
+              )}
+              <div
+                onClick={() => { setShowTotalHype(true); setShowSummary(false); }}
+                className={`flex items-center justify-center w-28 py-2 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                  showTotalHype ? 'text-white border-transparent' : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                }`}
+                style={showTotalHype ? {backgroundColor:'#0E318E'} : {}}
+              >
+                Total Hype
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onReset}
+                className="px-4 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
+              >
+                Reset
+              </button>
+              {days.length >= 2 && (
+                <button
+                  onClick={() => { setShowSummary(true); setSummaryDayIdx(days.length - 1); setShowTotalHype(false); }}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                    showSummary ? 'text-white border-transparent' : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                  }`}
+                  style={showSummary ? {backgroundColor:'#232A33'} : {}}
+                >
+                  Comparison
+                </button>
+              )}
+              <button
+                onClick={handlePrint}
+                className="px-4 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
+              >
+                Print PDF
+              </button>
+            </div>
+          </div>
+
+          {/* Print mode — all sections stacked */}
+          {printMode && (
+            <>
+              {days.map((day, i) => (
+                <div key={i} className="print-section space-y-4">
+                  <div className="print-section-label">Hype Day {i + 1}</div>
+                  <CampaignSection title="Purchase Objective Only" sectionNum={2} data={day.purchase} onChange={() => {}} audiences={audiences} />
+                  <CampaignSection title="All Objectives (Purchase + Naughty)" sectionNum={3} data={day.allObj} onChange={() => {}} audiences={audiences} showTips={false} />
+                  <DifferenceSection purchaseData={day.purchase} allObjData={day.allObj} audiences={audiences} />
+                  <BenchmarkIndicator allObjData={day.allObj} audiences={audiences} />
+                </div>
+              ))}
+              <div className="print-section space-y-4">
+                <div className="print-section-label">Total Hype</div>
+                <CampaignSection title="Purchase Objective Only" sectionNum={2} data={totalHype.purchase} onChange={() => {}} audiences={audiences} />
+                <CampaignSection title="All Objectives (Purchase + Naughty)" sectionNum={3} data={totalHype.allObj} onChange={() => {}} audiences={audiences} showTips={false} />
+                <DifferenceSection purchaseData={totalHype.purchase} allObjData={totalHype.allObj} audiences={audiences} />
+                <BenchmarkIndicator allObjData={totalHype.allObj} audiences={audiences} />
+              </div>
+              {days.length >= 2 && days.slice(1).map((_, i) => (
+                <div key={i} className="print-section space-y-4">
+                  <div className="print-section-label">Comparison — Hype {i + 1} vs Hype {i + 2}</div>
+                  <DaySummarySection days={days} audiences={audiences} summaryDayIdx={i + 1} setSummaryDayIdx={() => {}} />
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Content */}
+          {!printMode && (showTotalHype ? (
+            <>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-xs text-amber-700 font-medium">
+                Total Hype — use a combined date range in Meta to capture all hype days at once. This data is for reference only and does not affect the Summary.
+              </div>
+              <CampaignSection
+                title="Purchase Objective Only"
+                sectionNum={2}
+                data={totalHype.purchase}
+                onChange={makeTotalHypeHandler('purchase')}
+                audiences={audiences}
+              />
+              <CampaignSection
+                title="All Objectives (Purchase + Naughty)"
+                sectionNum={3}
+                data={totalHype.allObj}
+                onChange={makeTotalHypeHandler('allObj')}
+                audiences={audiences}
+                showTips={false}
+              />
+              <DifferenceSection
+                purchaseData={totalHype.purchase}
+                allObjData={totalHype.allObj}
+                audiences={audiences}
+              />
+              <BenchmarkIndicator
+                allObjData={totalHype.allObj}
+                audiences={audiences}
+              />
+              <Recommendations allObjData={totalHype.allObj} audiences={audiences} />
+              <div className="no-print flex gap-2 flex-wrap mt-6 justify-end">
+                {SAMPLES.map(s => (
+                  <button
+                    key={s.label}
+                    onClick={() => loadPreview(s)}
+                    className={`w-32 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                      activeLabel === s.label
+                        ? 'text-white border-transparent'
+                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                    }`}
+                    style={activeLabel === s.label ? {backgroundColor:'#0E318E'} : {}}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+                <button
+                  onClick={handleMySale}
+                  className={`w-32 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                    activeLabel === null
+                      ? 'bg-blue-500 text-white border-blue-500'
+                      : 'bg-white text-blue-500 border-blue-400 hover:bg-blue-50'
+                  }`}
+                >
+                  My Sale
+                </button>
+              </div>
+            </>
+          ) : !showSummary ? (
+            <>
+              <CampaignSection
+                title="Purchase Objective Only"
+                sectionNum={2}
+                data={activeDay.purchase}
+                onChange={makeSectionHandler(safeActiveDayIdx, 'purchase')}
+                audiences={audiences}
+              />
+              <CampaignSection
+                title="All Objectives (Purchase + Naughty)"
+                sectionNum={3}
+                data={activeDay.allObj}
+                onChange={makeSectionHandler(safeActiveDayIdx, 'allObj')}
+                audiences={audiences}
+                showTips={false}
+              />
+              <DifferenceSection
+                purchaseData={activeDay.purchase}
+                allObjData={activeDay.allObj}
+                audiences={audiences}
+              />
+              <BenchmarkIndicator
+                allObjData={activeDay.allObj}
+                audiences={audiences}
+              />
+              <Recommendations allObjData={activeDay.allObj} audiences={audiences} />
+              <div className="no-print flex gap-2 flex-wrap mt-6 justify-end">
+                {SAMPLES.map(s => (
+                  <button
+                    key={s.label}
+                    onClick={() => loadPreview(s)}
+                    className={`w-32 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                      activeLabel === s.label
+                        ? 'text-white border-transparent'
+                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                    }`}
+                    style={activeLabel === s.label ? {backgroundColor:'#0E318E'} : {}}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+                <button
+                  onClick={handleMySale}
+                  className={`w-32 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                    activeLabel === null
+                      ? 'bg-blue-500 text-white border-blue-500'
+                      : 'bg-white text-blue-500 border-blue-400 hover:bg-blue-50'
+                  }`}
+                >
+                  My Sale
+                </button>
+              </div>
+            </>
+          ) : (
+            <DaySummarySection
+              days={days}
+              audiences={audiences}
+              summaryDayIdx={summaryDayIdx}
+              setSummaryDayIdx={setSummaryDayIdx}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    // ── App ───────────────────────────────────────────────────────────────────
+    function App() {
+      const [session,     setSession]     = useState({ brand: 'Voomie', saleType: '', saleTypeOther: '', saleDate: 'May 2026', offerType: '', offerTypeOther: '', industry: 'Health & Personal Care', industryOther: '' });
+      const [audiences,   setAudiences]   = useState({
+        mofbofCombined: { low: '876,800', high: '876,800' },
+        mofbofExcl:     { low: '647,000', high: '647,000' },
+        engaged:        { low: '189,600', high: '189,600' },
+        existing:       { low: '59,300',  high: '59,300'  },
+      });
+      const [days,        setDays]        = useState([{
+        purchase: emptySection(),
+        allObj: {
+          mofbofCombined: { reach: '288,303', spend: '$13,995', impressions: '810,149' },
+          mofbofExcl:     { reach: '258,890', spend: '$13,448', impressions: '738,969' },
+          new:            { reach: '169,336', spend: '$4,396',  impressions: '304,207' },
+          engaged:        { reach: '90,717',  spend: '$6,102',  impressions: '306,268' },
+          existing:       { reach: '25,015',  spend: '$2,911',  impressions: '122,089' },
+          revenue: '',
+        },
+      }]);
+      const [activeLabel, setActiveLabel] = useState(null);
+      const [resetKey,    setResetKey]    = useState(0);
+      const [mySale, setMySale] = useState(null);
+
+      // Auto-save user's own data whenever they're not viewing a sample
+      React.useEffect(() => {
+        if (!SAMPLES.some(s => s.label === activeLabel)) {
+          setMySale({ session, audiences, days });
+        }
+      }, [session, audiences, days, activeLabel]);
+
+      const handleMySale = () => {
+        if (!mySale || !SAMPLES.some(s => s.label === activeLabel)) return;
+        setSession(mySale.session);
+        setAudiences(mySale.audiences);
+        setDays(mySale.days);
+        setActiveLabel(null);
+        setResetKey(k => k + 1);
+      };
+
+      const loadPreview = (sample) => {
+        // Snapshot user's own data before overwriting with sample
+        if (!SAMPLES.some(s => s.label === activeLabel)) {
+          setMySale({ session, audiences, days });
+        }
+        setSession({ brand: '', saleType: '', saleTypeOther: '', saleDate: '', offerType: '', offerTypeOther: '', industry: '', industryOther: '', ...sample.session });
+        setAudiences(sample.audiences);
+        setDays(sample.days ? sample.days : [{ purchase: sample.purchase, allObj: sample.allObj }]);
+        setActiveLabel(sample.label);
+        setResetKey(k => k + 1);
+      };
+
+      const clearAll = () => {
+        if (!window.confirm('Are you sure you want to reset? All data will be cleared.')) return;
+        setSession({ brand: '', saleType: '', saleTypeOther: '', saleDate: '', offerType: '', offerTypeOther: '', industry: '', industryOther: '' });
+        setAudiences(emptyAudiences());
+        setDays([emptyDay()]);
+        setActiveLabel(null);
+        setResetKey(k => k + 1);
+      };
+
+      return (
+        <div style={{maxWidth:'1420px'}} className="mx-auto px-6 py-6">
+          <div className="mb-6">
+            <h1 className="serif text-3xl text-gray-900">The Saturation Rate Calculator</h1>
+            <p className="text-sm text-gray-400 mt-1">Plan your hype spend and measure how effectively your campaigns are reaching your audience before, during, and after a sale.</p>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm px-6 py-5 mb-6 text-sm text-gray-600 leading-relaxed">
+            <p className="font-bold text-gray-900 mb-2">What is this?</p>
+            <p className="mb-3">During the hype period (days leading into a sale), we run ads to warm audiences so they're primed to buy the moment the sale goes live. This calculator tracks how much of each audience pool you've actually reached and whether you're on track to hit your target penetration before launch.</p>
+            <p className="font-bold text-gray-900 mb-2">Key metrics:</p>
+            <p className="mb-1"><strong className="text-gray-800">Saturation %</strong> = what percentage of the audience you've reached. Higher is better during hype. Target is 50%+ on the primary benchmark (MOF/BOF Excl. Video Views).</p>
+            <p className="mb-1"><strong className="text-gray-800">Frequency</strong> = how many times the average person has seen your ad. You want enough repetition to build awareness (3-6x for warm audiences) without burning them out.</p>
+            <p className="mb-1"><strong className="text-gray-800">CP/1000R</strong> = cost per 1,000 unique people reached. More useful than CPM here because you care about reaching new people, not just serving repeat impressions.</p>
+            <p><strong className="text-gray-800">Cost x1/x2/x3</strong> = estimated cost to reach the entire audience pool 1, 2, or 3 times at current efficiency. Useful for budgeting how much more you need to spend.</p>
+          </div>
+
+          <div className="mb-3">
+            <h2 className="text-xs font-bold text-gray-600 uppercase tracking-widest mb-3">Hype Spend</h2>
+            <HypeSpendCalc />
+          </div>
+
+          <div className="border-t border-gray-200 my-8" />
+
+          <div>
+            <div className="mb-3">
+              <h2 className="text-xs font-bold text-gray-600 uppercase tracking-widest">Saturation Rate Analysis</h2>
+            </div>
+            <SaturationCalc
+              session={session}     setSession={setSession}
+              audiences={audiences} setAudiences={setAudiences}
+              days={days}           setDays={setDays}
+              resetKey={resetKey}
+              onReset={clearAll}
+              activeLabel={activeLabel}
+              loadPreview={loadPreview}
+              handleMySale={handleMySale}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
